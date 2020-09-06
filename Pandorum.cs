@@ -90,7 +90,6 @@ namespace Pandorum
         }
 
         // Static wrappers, for cleaner code
-
         public static void Log(LogSeverity severity, string source, string message)
         {
             Logger.Print(new LogMessage(severity, source, message));
@@ -102,12 +101,14 @@ namespace Pandorum
         {
             Log(LogSeverity.Info, nameof(Pandorum), "Opening the box...");
 
-            string configFile = "Config/Pandorum.json";
+            const string configFile = "Config/Pandorum.json";
             Log(LogSeverity.Info, nameof(Pandorum), "Init configuration...");
 
             Configuration configuration = new Configuration();
             if(File.Exists(configFile))
                 configuration = JsonConvert.DeserializeObject<Configuration>(File.ReadAllText(configFile));
+            else
+                Log(LogSeverity.Warning, nameof(Pandorum), $"{configFile} not found");
 
             Log(LogSeverity.Info, nameof(Pandorum), "Init events...");
             Console.CancelKeyPress += new ConsoleCancelEventHandler(OnConsoleCancelKeyPress);
@@ -135,29 +136,22 @@ namespace Pandorum
             }
 
             if(Dry)
+            {
+                Log(LogSeverity.Info, nameof(Pandorum), "Dry run -- exiting");
                 return;
+            }
+
+            if(string.IsNullOrEmpty(Services.GetRequiredService<Configuration>().Token))
+            {
+                Log(LogSeverity.Error, nameof(Pandorum), "Discord token not found -- exiting");
+                return;
+            }
 
             Log(LogSeverity.Info, nameof(Pandorum), "Init Discord...");
             await discord.LoginAsync(TokenType.Bot, Services.GetRequiredService<Configuration>().Token);
             await discord.StartAsync();
 
             await Task.Delay(-1);
-        }
-
-        private async Task BackWork()
-        {
-            void DoBackWork()
-            {
-                while(true)
-                {
-                    System.Threading.Thread.Sleep(150);
-                    Console.WriteLine("::Background::");
-                }
-            }
-
-            var task = new Task(() => DoBackWork());
-            task.Start();
-            await task; 
         }
 
         private ServiceProvider ConfigureServices(Configuration configuration, IServiceCollection services)
@@ -182,6 +176,8 @@ namespace Pandorum
             return services.BuildServiceProvider();
         }
 
+        //
+
         private void OnConsoleCancelKeyPress(object sender, ConsoleCancelEventArgs args)
         {
             Log(LogSeverity.Info, nameof(Pandorum), "Shutting down...");
@@ -197,7 +193,5 @@ namespace Pandorum
 
             return Task.CompletedTask;
         }
-
-        //
     }
 }

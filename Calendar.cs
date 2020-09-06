@@ -68,13 +68,12 @@ namespace Pandorum
         private async Task Worker(CancellationToken token)
         {
             await Task.Delay(1000 - DateTime.Now.Millisecond);
-            Pandorum.Log(LogSeverity.Verbose, nameof(Calendar), $"Worker spin @ {DateTime.Now.ToString()}");
 
             while(!token.IsCancellationRequested)
             {
                 if(DateTime.Now.Second == 0)
                 {
-                    Pandorum.Log(LogSeverity.Verbose, nameof(Calendar), "Refresh cached events");
+                    Pandorum.Log(LogSeverity.Verbose, nameof(Calendar), "Refresh events cache");
                     RefreshCalendars();
 
                     var debugChannelId = Pandorum.Services.GetRequiredService<Configuration>().Calendar.DebugChannel;
@@ -159,21 +158,6 @@ namespace Pandorum
             }
         }
 
-        public Task OnDiscordConnected()
-        {
-            StartWorker();
-
-            return Task.CompletedTask;
-        }
-
-        public Task OnDiscordDisconnected(Exception e)
-        {
-
-            StopWorker();
-
-            return Task.CompletedTask;
-        }
-
         public void RefreshCalendars()
         {
             CalendarListResource.ListRequest request = GoogleCalendar.CalendarList.List();
@@ -240,14 +224,14 @@ namespace Pandorum
             EmbedFooterBuilder footer = new EmbedFooterBuilder();;
 
             const string format = "dd.MM HH:mm";
-            TimeZoneInfo tzEST = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
+            //TimeZoneInfo tzEST = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
 
             embed.WithTitle(e.Summary);
             if(!string.IsNullOrEmpty(e.Description))
                 embed.WithDescription(e.Description);
 
             DateTime utc = ((DateTime)e.Start.DateTime).ToUniversalTime();
-            DateTime est = TimeZoneInfo.ConvertTimeFromUtc(utc, tzEST);
+            //DateTime est = TimeZoneInfo.ConvertTimeFromUtc(utc, tzEST);
 
             if(!string.IsNullOrEmpty(e.Start.TimeZone))
                 footer.WithText($"{utc.ToString(format)} UTC");// / {est.ToString(format)} EST");
@@ -258,6 +242,23 @@ namespace Pandorum
             embed.WithFooter(footer);
 
             return embed.Build();
+        }
+
+        //
+
+        public Task OnDiscordConnected()
+        {
+            StartWorker();
+
+            return Task.CompletedTask;
+        }
+
+        public Task OnDiscordDisconnected(Exception e)
+        {
+
+            StopWorker();
+
+            return Task.CompletedTask;
         }
     }
 
@@ -279,7 +280,7 @@ namespace Pandorum
         {
             var calendar = Pandorum.Services.GetRequiredService<Calendar>();
 
-            // Happen only when using !calendar right after start
+            // Happen only when using !calendar right after starting bot (calendar events are cached every full minute)
             if(!calendar.IncomingEventsCached)
                 calendar.RefreshCalendars();
 

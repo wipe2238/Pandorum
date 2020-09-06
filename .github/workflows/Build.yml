@@ -34,6 +34,10 @@ jobs:
   - name: Build
     run:  dotnet build
 
+  - name: Run
+    run:  dotnet run --dry
+    timeout-minutes: 5
+
   - name: Publish
     run:  dotnet publish --output Publish
 
