@@ -1,0 +1,6 @@
+/Build*/*
+!/Build/dotnet.sh
+!/Build/msbuild.sh
+
+/Config/
+/Publish*/

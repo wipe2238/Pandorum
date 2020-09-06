@@ -1,0 +1,44 @@
+name: Build
+
+on:
+ push:
+  paths:
+  - '.github/workflows/Build.yml'
+  - 'Build/*.sh'
+  - '**.csproj'
+  - '**.cs'
+ pull_request:
+  paths:
+  - '.github/workflows/Build.yml'
+  - 'Build/*.sh'
+  - '**.csproj'
+  - '**.cs'
+
+env:
+ DOTNET_CLI_TELEMETRY_OPTOUT: 1
+
+defaults:
+ run:
+  shell: bash
+
+jobs:
+
+ Windows:
+  runs-on: windows-latest
+
+  steps:
+
+  - name: Clone
+    uses: actions/checkout@v2
+
+  - name: Build
+    run:  dotnet build
+
+  - name: Publish
+    run:  dotnet publish --output Publish
+
+  - name: Upload
+    uses: actions/upload-artifact@v2
+    with:
+     name: Pandorum
+     path: Publish
