@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -17,6 +18,8 @@ using Google.Apis.Services;
 using Google.Apis.Util.Store;
 
 using Microsoft.Extensions.DependencyInjection;
+
+// https://docs.microsoft.com/en-us/dotnet/standard/base-types/custom-date-and-time-format-strings //
 
 namespace Pandorum
 {
@@ -185,9 +188,9 @@ namespace Pandorum
             EventsResource.ListRequest request = GoogleCalendar.Events.List(calendarId);
             request.TimeMin = DateTime.Now;
             request.ShowDeleted = false;
-            request.SingleEvents = true;
+            request.SingleEvents = false;
             request.MaxResults = 10;
-            request.OrderBy = EventsResource.ListRequest.OrderByEnum.StartTime;
+            //request.OrderBy = EventsResource.ListRequest.OrderByEnum.StartTime;
 
             Events eventsList = request.Execute();
             if (eventsList.Items != null && eventsList.Items.Count > 0)
@@ -223,7 +226,7 @@ namespace Pandorum
             EmbedBuilder embed = new EmbedBuilder();;
             EmbedFooterBuilder footer = new EmbedFooterBuilder();;
 
-            const string format = "dd.MM HH:mm";
+            const string format = "dd.MM.yyyy HH:mm";
             //TimeZoneInfo tzEST = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
 
             embed.WithTitle(e.Summary);
@@ -238,6 +241,8 @@ namespace Pandorum
             else
                 footer.WithText($"{utc.ToString(format)} (timezone not set)");
 
+            //footer.WithText($"ID {e.Id}");
+            //footer.WithText($"RID {e.RecurringEventId}");
 
             embed.WithFooter(footer);
 
@@ -267,11 +272,55 @@ namespace Pandorum
     {
         [RequireMaintainer]
         [Command("add")]
-        public /*async*/ Task CmdCalendarAdd(string date, string time, string timezone, string summary, string description = "")
+        public async Task CmdCalendarAdd(string date, string time, string timezone, string summary, string description = "")
         {
-            ReplyAsync("Calendar Add");
+            string[] dateFormat = { "d.M.yyyy", "d.MM.yyyy", "dd.M.yyyy", "dd.MM.yyyy" };
+            string[] timeFormat = { "H:mm", "HH:mm" };
 
-            return Task.CompletedTask;
+            // Extract values during date/time validation
+
+            int day, month, year, hour, minute;
+
+            if(DateTime.TryParseExact(date, dateFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out var tempDate))
+            {
+                day = tempDate.Day;
+                month = tempDate.Month;
+                year = tempDate.Year;
+            }
+            else
+            {
+                await ReplyAsync("Invalid date");
+                return;
+            }
+
+            if(DateTime.TryParseExact(time, timeFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out var tempTime))
+            {
+                hour = tempTime.Hour;
+                minute = tempTime.Minute;
+            }
+            else
+            {
+                await ReplyAsync("Invalid time");
+                return;
+            }
+
+            if(timezone.ToLower() != "utc")
+            {
+                await ReplyAsync("Invalid timezone");
+                return;
+            }
+
+            DateTime start = new DateTime(year, month, day, hour, minute, 0, DateTimeKind.Utc);
+
+            // Make sure event doesn't start in past
+
+            if(DateTime.UtcNow > start)
+            {
+                await ReplyAsync($"Invalid date/time -- expired {(start - DateTime.UtcNow).TotalMinutes}");
+                return;
+            }
+
+            await ReplyAsync($"-> {start.ToString("F", CultureInfo.InvariantCulture)} {start.Kind.ToString()}");
         }
 
         [RequireMaintainer]
