@@ -192,6 +192,10 @@ namespace Pandorum
         {
             Log(LogSeverity.Info, nameof(Pandorum), "Shutting down...");
 
+            var discord = Services.GetService<DiscordSocketClient>();
+            if(discord != null)
+                discord.SetStatusAsync(UserStatus.DoNotDisturb);
+
             var calendar = Services.GetService<Calendar>();
             if(calendar != null)
                 calendar.StopWorker();
