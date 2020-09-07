@@ -24,6 +24,10 @@ namespace Pandorum
         {
             public bool   Enabled;
 
+            // ID of calendar used by !calendar commands
+            // Note that all calendars with name starting with "Pandorum" (case insensitive) are checked for incoming events
+            public string Id;
+
             public UInt64 DebugChannel;
         }
 

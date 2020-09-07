@@ -76,8 +76,9 @@ namespace Pandorum
             {
                 if(DateTime.Now.Second == 0)
                 {
-                    Pandorum.Log(LogSeverity.Verbose, nameof(Calendar), "Refresh events cache");
+                    Pandorum.Log(LogSeverity.Debug, nameof(Calendar), "Refresh events cache...");
                     RefreshCalendars();
+                    Pandorum.Log(LogSeverity.Debug, nameof(Calendar), $"Refresh events cache... {IncomingEvents.Count} event{(IncomingEvents.Count != 1 ? "s" : "")}");
 
                     var debugChannelId = Pandorum.Services.GetRequiredService<Configuration>().Calendar.DebugChannel;
                     var debugChannel = Pandorum.Services.GetRequiredService<DiscordSocketClient>().GetChannel(debugChannelId) as ISocketMessageChannel;
@@ -186,7 +187,8 @@ namespace Pandorum
         public void RefreshCalendarEvents(string calendarId, ref List<Event> events)
         {
             EventsResource.ListRequest request = GoogleCalendar.Events.List(calendarId);
-            request.TimeMin = DateTime.Now;
+            request.TimeMin = DateTime.Now.ToUniversalTime();
+            request.TimeMax = DateTime.MaxValue.ToUniversalTime();
             request.ShowDeleted = false;
             request.SingleEvents = false;
             request.MaxResults = 10;
@@ -202,36 +204,49 @@ namespace Pandorum
             }
         }
 
-        public void AddEvent(string calendarId, string summary, string description, DateTime dateTime, DateTime endDateTime)
+        public Event InsertEvent(string calendarId, string summary, string description, DateTime dateTime, DateTime endDateTime)
         {
             var calendarEvent = new Event();
 
             EventDateTime eventStart = new EventDateTime();
             eventStart.DateTime = dateTime;
+            eventStart.TimeZone = "UTC";
 
             EventDateTime eventEnd = new EventDateTime();
             eventEnd.DateTime = endDateTime;
+            eventEnd.TimeZone = "UTC";
 
             calendarEvent.Start = eventStart;
             calendarEvent.End = eventEnd;
             calendarEvent.Summary = summary;
-            calendarEvent.Description = description;
+
+            if(!string.IsNullOrEmpty(description))
+                calendarEvent.Description = description;
 
             Event result = GoogleCalendar.Events.Insert(calendarEvent, calendarId).Execute();
-            Pandorum.Log(LogSeverity.Info, nameof(Calendar), $"Event created: {result.HtmlLink}");
+            IncomingEventsCached = false;
+
+            return result;
         }
 
-        public Embed GetEventAsEmbed(Event e)
+        public void DeleteEvent(string calendarId, string eventId)
         {
-            EmbedBuilder embed = new EmbedBuilder();;
-            EmbedFooterBuilder footer = new EmbedFooterBuilder();;
+            GoogleCalendar.Events.Delete(calendarId, eventId).Execute();
+            IncomingEventsCached = false;
+        }
 
+        public Embed GetEventAsEmbed(Event e, bool details = false)
+        {
             const string format = "dd.MM.yyyy HH:mm";
             //TimeZoneInfo tzEST = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
+
+            EmbedBuilder embed = new EmbedBuilder();;
 
             embed.WithTitle(e.Summary);
             if(!string.IsNullOrEmpty(e.Description))
                 embed.WithDescription(e.Description);
+
+            EmbedFooterBuilder footer = new EmbedFooterBuilder();;
 
             DateTime utc = ((DateTime)e.Start.DateTime).ToUniversalTime();
             //DateTime est = TimeZoneInfo.ConvertTimeFromUtc(utc, tzEST);
@@ -239,10 +254,12 @@ namespace Pandorum
             if(!string.IsNullOrEmpty(e.Start.TimeZone))
                 footer.WithText($"{utc.ToString(format)} UTC");// / {est.ToString(format)} EST");
             else
-                footer.WithText($"{utc.ToString(format)} (timezone not set)");
+                footer.WithText($"{utc.ToString(format)} (UTC?)");
 
-            //footer.WithText($"ID {e.Id}");
-            //footer.WithText($"RID {e.RecurringEventId}");
+            if(details)
+            {
+                footer.Text += $"\nID {e.Id}";
+            }
 
             embed.WithFooter(footer);
 
@@ -306,6 +323,8 @@ namespace Pandorum
 
             if(timezone.ToLower() != "utc")
             {
+                // This argument exists only to remind humans that time has to be UTC
+
                 await ReplyAsync("Invalid timezone");
                 return;
             }
@@ -320,16 +339,50 @@ namespace Pandorum
                 return;
             }
 
+            // Text validation
+
+            if(string.IsNullOrEmpty(summary))
+            {
+                await ReplyAsync("Invalid summary");
+                return;
+            }
+
+            var calendar = Pandorum.Services.GetRequiredService<Calendar>();
+            var configuration = Pandorum.Services.GetRequiredService<Configuration>();
+
+            if(string.IsNullOrEmpty(configuration.Calendar.Id))
+            {
+                Pandorum.Log(LogSeverity.Warning, nameof(Commands), "Missing calendar Id");
+                return;
+            }
+
             await ReplyAsync($"-> {start.ToString("F", CultureInfo.InvariantCulture)} {start.Kind.ToString()}");
+
+            Event result = calendar.InsertEvent(configuration.Calendar.Id, summary, description, start, start);
+            Pandorum.Log(LogSeverity.Info, nameof(Calendar), $"Event created: {result.HtmlLink}");
+        }
+
+        [RequireMaintainer]
+        [Command("delete")]
+        public async Task CmdCalendarDelete(string eventId)
+        {
+            if(string.IsNullOrEmpty(eventId))
+            {
+                await ReplyAsync("Invalid id");
+                return;
+            }
+
+            var configuration = Pandorum.Services.GetRequiredService<Configuration>();
+
+            Pandorum.Services.GetRequiredService<Calendar>().DeleteEvent(configuration.Calendar.Id, eventId);
         }
 
         [RequireMaintainer]
         [Command("show")]
-        public async Task CmdCalendarShow()
+        public async Task CmdCalendarShow(string option = "")
         {
             var calendar = Pandorum.Services.GetRequiredService<Calendar>();
 
-            // Happen only when using !calendar right after starting bot (calendar events are cached every full minute)
             if(!calendar.IncomingEventsCached)
                 calendar.RefreshCalendars();
 
@@ -337,7 +390,7 @@ namespace Pandorum
             {
                 foreach(var e in calendar.IncomingEvents)
                 {
-                    await ReplyAsync(embed: calendar.GetEventAsEmbed(e));
+                    await ReplyAsync(embed: calendar.GetEventAsEmbed(e, option == "details"));
                 }
             }
             else
