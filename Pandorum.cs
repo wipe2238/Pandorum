@@ -45,6 +45,7 @@ namespace Pandorum
 
         public void Save()
         {
+            new FileInfo(FileName).Directory.Create();
             File.WriteAllText(FileName, Data.ToString(), System.Text.Encoding.UTF8);
         }
 
