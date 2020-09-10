@@ -21,9 +21,8 @@ namespace Pandorum
             {
                 case TokenType.Bot:
                     var application = await context.Client.GetApplicationInfoAsync().ConfigureAwait(false);
-                    var configuration = Pandorum.Services.GetRequiredService<Configuration>();
 
-                    if (context.User.Id != application.Owner.Id && !configuration.Maintainers.Contains(context.User.Id))
+                    if (context.User.Id != application.Owner.Id && !Pandorum.Configuration.Maintainers.Contains(context.User.Id))
                         return PreconditionResult.FromError(ErrorMessage ?? "Command can only be run by the maintainer of the bot.");
 
                     return PreconditionResult.FromSuccess();

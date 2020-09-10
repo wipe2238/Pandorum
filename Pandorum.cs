@@ -18,22 +18,68 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Pandorum
 {
+    public class Cache
+    {
+        private JObject Data;
+        private readonly string FileName;
+
+        public Cache(string filename)
+        {
+            Data = JObject.Parse("{}");
+            FileName = filename;
+        }
+
+        public bool Load()
+        {
+            if(File.Exists(FileName))
+            {
+                Data = JObject.Parse(File.ReadAllText(FileName));
+                return true;
+            }
+            else
+            {
+                Data = JObject.Parse("{}");
+                return false;
+            }
+        }
+
+        public void Save()
+        {
+            File.WriteAllText(FileName, Data.ToString(), System.Text.Encoding.UTF8);
+        }
+
+        public JToken this[string key]
+        {
+            get
+            {
+                if(key.Contains("."))
+                    return Data.SelectToken(key);
+                else
+                    return Data[key];
+            }
+            set
+            {
+                Data[key] = value;
+            }
+        }
+    }
+
     public class Configuration
     {
         public class ConfigurationCalendar
         {
-            public bool   Enabled;
+            public bool   Enabled = false;
 
             // ID of calendar used by !calendar commands
             // Note that all calendars with name starting with "Pandorum" (case insensitive) are checked for incoming events
-            public string Id;
+            public string Id = "";
 
-            public UInt64 DebugChannel;
+            public UInt64 DebugChannel = 0;
         }
 
         public class ConfigurationCommands
         {
-            public bool Enabled;
+            public bool Enabled = false;
         }
 
         public string Token;
@@ -74,10 +120,21 @@ namespace Pandorum
 
     class Pandorum
     {
+        private static Pandorum Self;
+
+        public static Cache               Cache           => Self.Services.GetRequiredService<Cache>();
+        public static Calendar            Calendar        => Self.Services.GetRequiredService<Calendar>();
+        public static Commands            Commands        => Self.Services.GetRequiredService<Commands>();
+        public static Configuration       Configuration   => Self.Services.GetRequiredService<Configuration>();
+        public static DiscordSocketClient Discord         => Self.Services.GetRequiredService<DiscordSocketClient>();
+        public static CommandService      DiscordCommands => Self.Services.GetRequiredService<CommandService>();
+
+        //
+
         public bool Dry = false;
         public bool Passive = false;
 
-        public static ServiceProvider Services;
+        private ServiceProvider Services;
 
         private static void Main(params string[] args)
         {
@@ -86,20 +143,19 @@ namespace Pandorum
             CultureInfo.DefaultThreadCurrentCulture = cultureInfo;
             CultureInfo.DefaultThreadCurrentUICulture = cultureInfo;
 
-            Pandorum self = new Pandorum();
+            Self = new Pandorum();
 
             foreach(string arg in args)
             {
                 if(arg == "--dry")
-                    self.Dry = true;
+                    Self.Dry = true;
                 else if(arg == "--passive")
-                    self.Passive = true;
+                    Self.Passive = true;
             }
 
-            self.OpenTheBox().GetAwaiter().GetResult();
+            Self.OpenTheBox().GetAwaiter().GetResult();
         }
 
-        // Static wrappers, for cleaner code
         public static void Log(LogSeverity severity, string source, string message)
         {
             Logger.Print(new LogMessage(severity, source, message));
@@ -111,39 +167,47 @@ namespace Pandorum
         {
             Log(LogSeverity.Info, nameof(Pandorum), "Opening the box...");
 
-            const string configFile = "Config/Pandorum.json";
+            string jsonFile = "Config/Pandorum.json";
             Log(LogSeverity.Info, nameof(Pandorum), "Init configuration...");
 
             Configuration configuration = new Configuration();
-            if(File.Exists(configFile))
-                configuration = JsonConvert.DeserializeObject<Configuration>(File.ReadAllText(configFile));
+            if(File.Exists(jsonFile))
+                configuration = JsonConvert.DeserializeObject<Configuration>(File.ReadAllText(jsonFile));
             else
-                Log(LogSeverity.Warning, nameof(Pandorum), $"{configFile} not found");
+                Log(LogSeverity.Warning, nameof(Pandorum), $"{jsonFile} not found");
+
+            jsonFile = "Config/Pandorum.Cache.json";
+            Log(LogSeverity.Info, nameof(Pandorum), "Init cache...");
+
+            Cache cache = new Cache(jsonFile);
+            if(!cache.Load())
+                Log(LogSeverity.Warning, nameof(Pandorum), $"{jsonFile} not found");
 
             Log(LogSeverity.Info, nameof(Pandorum), "Init events...");
             Console.CancelKeyPress += new ConsoleCancelEventHandler(OnConsoleCancelKeyPress);
 
             Log(LogSeverity.Info, nameof(Pandorum), "Init services...");
-            Services = ConfigureServices(configuration, new ServiceCollection());
+            Services = ConfigureServices(configuration, cache, new ServiceCollection());
 
             // Initialize services
 
             Services.GetRequiredService<Logger>();
 
-            var discord = Services.GetRequiredService<DiscordSocketClient>();
-            discord.Connected += OnDiscordConnected;
+            Discord.Connected += OnDiscordConnected;
 
-            if(Services.GetRequiredService<Configuration>().Calendar.Enabled)
+            if(Configuration.Calendar.Enabled)
             {
                 Log(LogSeverity.Info, nameof(Pandorum), "Init calendar...");
                 Services.GetRequiredService<Calendar>();
             }
 
-            if(!Passive && Services.GetRequiredService<Configuration>().Commands.Enabled)
+            if(!Passive && Configuration.Commands.Enabled)
             {
                 Log(LogSeverity.Info, nameof(Pandorum), "Init commands...");
                 Services.GetRequiredService<Commands>();
             }
+
+            cache.Save();
 
             if(Dry)
             {
@@ -151,23 +215,24 @@ namespace Pandorum
                 return;
             }
 
-            if(string.IsNullOrEmpty(Services.GetRequiredService<Configuration>().Token))
+            if(string.IsNullOrEmpty(Configuration.Token))
             {
                 Log(LogSeverity.Error, nameof(Pandorum), "Discord token not found -- exiting");
                 return;
             }
 
             Log(LogSeverity.Info, nameof(Pandorum), "Init Discord...");
-            await discord.LoginAsync(TokenType.Bot, Services.GetRequiredService<Configuration>().Token);
-            await discord.StartAsync();
+            await Discord.LoginAsync(TokenType.Bot, Configuration.Token);
+            await Discord.StartAsync();
 
             await Task.Delay(-1);
         }
 
-        private ServiceProvider ConfigureServices(Configuration configuration, IServiceCollection services)
+        private ServiceProvider ConfigureServices(Configuration configuration, Cache cache, IServiceCollection services)
         {
            services
             .AddSingleton(configuration)
+            .AddSingleton(cache)
             .AddSingleton<Logger>()
             .AddSingleton(new DiscordSocketClient(new DiscordSocketConfig
             {

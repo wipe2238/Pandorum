@@ -19,6 +19,9 @@ using Google.Apis.Util.Store;
 
 using Microsoft.Extensions.DependencyInjection;
 
+//using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+
 // https://docs.microsoft.com/en-us/dotnet/standard/base-types/custom-date-and-time-format-strings //
 
 namespace Pandorum
@@ -34,7 +37,7 @@ namespace Pandorum
 
         private CancellationTokenSource WorkerToken;
 
-        public Calendar()
+        public Calendar(Cache cache, DiscordSocketClient discord)
         {
             string directory = $"{Directory.GetCurrentDirectory()}/Config/Google";
 
@@ -63,9 +66,11 @@ namespace Pandorum
                 });
             }
 
-            var discord = Pandorum.Services.GetRequiredService<DiscordSocketClient>();
             discord.Connected += OnDiscordConnected;
             discord.Disconnected += OnDiscordDisconnected;
+
+            if(cache["Calendar"] == null)
+                cache["Calendar"] = new JObject();
         }
 
         private async Task Worker(CancellationToken token)
@@ -80,8 +85,8 @@ namespace Pandorum
                     RefreshCalendars();
                     Pandorum.Log(LogSeverity.Debug, nameof(Calendar), $"Refresh events cache... {IncomingEvents.Count} event{(IncomingEvents.Count != 1 ? "s" : "")}");
 
-                    var debugChannelId = Pandorum.Services.GetRequiredService<Configuration>().Calendar.DebugChannel;
-                    var debugChannel = Pandorum.Services.GetRequiredService<DiscordSocketClient>().GetChannel(debugChannelId) as ISocketMessageChannel;
+                    var debugChannelId = Pandorum.Configuration.Calendar.DebugChannel;
+                    var debugChannel = Pandorum.Discord.GetChannel(debugChannelId) as ISocketMessageChannel;
 
                     foreach(Event e in IncomingEvents)
                     {
@@ -125,7 +130,9 @@ namespace Pandorum
 
                                 soon = $"T-{daysLeft}day{(daysLeft != 1 ? "s" : "")}";
                                 Pandorum.Log(LogSeverity.Verbose, nameof(Calendar), $"{soon} : {e.Summary}");
-                                await debugChannel?.SendMessageAsync(soon, embed: GetEventAsEmbed(e));
+
+                                if(daysLeft <= 7)
+                                    await debugChannel?.SendMessageAsync(soon, embed: GetEventAsEmbed(e));
                             }
                             else if(hoursLeft <= 12 && hoursLeft % 3 == 0)
                             {
@@ -347,10 +354,7 @@ namespace Pandorum
                 return;
             }
 
-            var calendar = Pandorum.Services.GetRequiredService<Calendar>();
-            var configuration = Pandorum.Services.GetRequiredService<Configuration>();
-
-            if(string.IsNullOrEmpty(configuration.Calendar.Id))
+            if(string.IsNullOrEmpty(Pandorum.Configuration.Calendar.Id))
             {
                 Pandorum.Log(LogSeverity.Warning, nameof(Commands), "Missing calendar Id");
                 return;
@@ -358,7 +362,7 @@ namespace Pandorum
 
             await ReplyAsync($"-> {start.ToString("F", CultureInfo.InvariantCulture)} {start.Kind.ToString()}");
 
-            Event result = calendar.InsertEvent(configuration.Calendar.Id, summary, description, start, start);
+            Event result = Pandorum.Calendar.InsertEvent(Pandorum.Configuration.Calendar.Id, summary, description, start, start);
             Pandorum.Log(LogSeverity.Info, nameof(Calendar), $"Event created: {result.HtmlLink}");
         }
 
@@ -372,25 +376,21 @@ namespace Pandorum
                 return;
             }
 
-            var configuration = Pandorum.Services.GetRequiredService<Configuration>();
-
-            Pandorum.Services.GetRequiredService<Calendar>().DeleteEvent(configuration.Calendar.Id, eventId);
+            Pandorum.Calendar.DeleteEvent(Pandorum.Configuration.Calendar.Id, eventId);
         }
 
         [RequireMaintainer]
         [Command("show")]
         public async Task CmdCalendarShow(string option = "")
         {
-            var calendar = Pandorum.Services.GetRequiredService<Calendar>();
+            if(!Pandorum.Calendar.IncomingEventsCached)
+                Pandorum.Calendar.RefreshCalendars();
 
-            if(!calendar.IncomingEventsCached)
-                calendar.RefreshCalendars();
-
-            if(calendar.IncomingEvents.Any())
+            if(Pandorum.Calendar.IncomingEvents.Any())
             {
-                foreach(var e in calendar.IncomingEvents)
+                foreach(var e in Pandorum.Calendar.IncomingEvents)
                 {
-                    await ReplyAsync(embed: calendar.GetEventAsEmbed(e, option == "details"));
+                    await ReplyAsync(embed: Pandorum.Calendar.GetEventAsEmbed(e, option == "details"));
                 }
             }
             else

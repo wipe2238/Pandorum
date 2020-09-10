@@ -12,10 +12,13 @@ namespace Pandorum
 {
     public class Commands
     {
-        public Commands()
+        private IServiceProvider BotServices;
+
+        public Commands(DiscordSocketClient discord, CommandService commands, IServiceProvider services)
         {
-            var commands = Pandorum.Services.GetRequiredService<CommandService>();
-            commands.AddModulesAsync(Assembly.GetEntryAssembly(), Pandorum.Services);
+            BotServices = services;
+
+            commands.AddModulesAsync(Assembly.GetEntryAssembly(), BotServices);
 
             foreach(CommandInfo cmd in commands.Commands)
             {
@@ -29,8 +32,8 @@ namespace Pandorum
                 Pandorum.Log(LogSeverity.Info, nameof(Commands), info);
             }
 
-            Pandorum.Services.GetRequiredService<DiscordSocketClient>().MessageReceived += OnMessageReceived;
-            Pandorum.Services.GetRequiredService<CommandService>().CommandExecuted += OnCommandExecuted;
+            discord.MessageReceived += OnMessageReceived;
+            commands.CommandExecuted += OnCommandExecuted;
         }
 
         private async Task OnMessageReceived(SocketMessage msg)
@@ -39,10 +42,8 @@ namespace Pandorum
             if(message == null)
                 return;
 
-            var discord = Pandorum.Services.GetRequiredService<DiscordSocketClient>();
-
             // Ignore own messages
-            if(message.Author.Id == discord.CurrentUser.Id)
+            if(message.Author.Id == Pandorum.Discord.CurrentUser.Id)
                 return;
 
             // Ignore other bots messages
@@ -52,11 +53,8 @@ namespace Pandorum
             int idx = 0;
             if(message.HasStringPrefix("!", ref idx))
             {
-                var context = new SocketCommandContext(discord, message);
-                var result = await Pandorum.Services.GetRequiredService<CommandService>().ExecuteAsync(context, idx, Pandorum.Services);
-
-                //if (!result.IsSuccess)
-                //    Console.WriteLine($"Command error : {result.ToString()} : {message.Content}");
+                var context = new SocketCommandContext(Pandorum.Discord, message);
+                var result = await Pandorum.DiscordCommands.ExecuteAsync(context, idx, BotServices);
             }
         }
 
